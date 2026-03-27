@@ -8,7 +8,7 @@ import time
 st.set_page_config(layout="wide")
 
 st.title("NIFTY 200 Smart Trade Scanner")
-st.write("RSI + MACD based Intraday / Swing / Long-term signals")
+st.write("Based on RSI + MACD based Intraday / Swing / Long-term signals")
 
 
 # ---------- Fetch NIFTY 200 ----------
