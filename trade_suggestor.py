@@ -1,12 +1,18 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
 import time
-from datetime import datetime
+
+st.set_page_config(layout="wide")
+
+st.title("NIFTY 200 Smart Trade Scanner")
+st.write("RSI + MACD based Intraday / Swing / Long-term signals")
 
 
 # ---------- Fetch NIFTY 200 ----------
+@st.cache_data
 def get_nifty200():
 
     url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20200"
@@ -59,12 +65,11 @@ def macd(data):
     return macd, signal
 
 
-# ---------- Decision Engine ----------
+# ---------- Decision ----------
 def decide(rsi_val, macd_val, signal_val, price, ma20):
 
     score = 0
 
-    # RSI
     if rsi_val < 35:
         score += 3
     elif rsi_val < 45:
@@ -74,19 +79,16 @@ def decide(rsi_val, macd_val, signal_val, price, ma20):
     elif rsi_val > 75:
         score -= 2
 
-    # MACD
     if macd_val > signal_val:
         score += 2
     else:
         score -= 1
 
-    # Trend
     if price > ma20:
         score += 2
     else:
         score -= 1
 
-    # signal strength
     if score >= 6:
         signal_txt = "🟢 STRONG BUY"
     elif score >= 4:
@@ -98,7 +100,6 @@ def decide(rsi_val, macd_val, signal_val, price, ma20):
     else:
         signal_txt = "⚪ HOLD"
 
-    # timeframe
     if rsi_val < 50 and macd_val > signal_val:
         trade = "⚡ Intraday"
     elif 45 < rsi_val < 65:
@@ -109,8 +110,8 @@ def decide(rsi_val, macd_val, signal_val, price, ma20):
     return signal_txt, trade, score
 
 
-# ---------- Safe Download ----------
-def safe_download(stock):
+# ---------- Analyze ----------
+def analyze(stock):
 
     try:
         df = yf.download(
@@ -121,73 +122,58 @@ def safe_download(stock):
             threads=False
         )
 
-        if df is None or df.empty:
+        if df is None or len(df) < 50:
             return None
 
-        return df
+        df['RSI'] = rsi(df)
+        macd_val, signal = macd(df)
+
+        r = df['RSI'].iloc[-1].item()
+        m = macd_val.iloc[-1].item()
+        s = signal.iloc[-1].item()
+
+        price = df['Close'].iloc[-1].item()
+        ma20 = df['Close'].rolling(20).mean().iloc[-1].item()
+
+        signal_txt, trade, score = decide(r, m, s, price, ma20)
+
+        return [stock, r, score, signal_txt, trade]
 
     except:
         return None
 
 
-# ---------- Analyze ----------
-def analyze(stock):
+# ---------- UI ----------
+if st.button("Run NIFTY 200 Scan"):
 
-    df = safe_download(stock)
+    stocks = get_nifty200()
 
-    if df is None or len(df) < 50:
-        return None
+    progress = st.progress(0)
+    status = st.empty()
 
-    df['RSI'] = rsi(df)
-    macd_val, signal = macd(df)
+    results = []
 
-    # safe scalar extraction
-    r = df['RSI'].iloc[-1].item()
-    m = macd_val.iloc[-1].item()
-    s = signal.iloc[-1].item()
+    total = len(stocks)
 
-    price = df['Close'].iloc[-1].item()
-    ma20 = df['Close'].rolling(20).mean().iloc[-1].item()
+    for i, s in enumerate(stocks):
 
-    signal_txt, trade, score = decide(r, m, s, price, ma20)
+        status.text(f"Scanning {i+1}/{total} : {s}")
+        progress.progress((i+1)/total)
 
-    return stock, r, score, signal_txt, trade
-
-
-# ---------- MAIN ----------
-print("\nFetching NIFTY 200...")
-stocks = get_nifty200()
-
-print("Total stocks:", len(stocks))
-print("Scan time:", datetime.now())
-print()
-
-results = []
-
-for i, s in enumerate(stocks, 1):
-
-    print(f"Scanning {i}/{len(stocks)} : {s}")
-
-    try:
         res = analyze(s)
 
         if res:
             results.append(res)
 
-    except Exception as e:
-        print("Error:", s)
+        time.sleep(0.05)
 
-    time.sleep(0.25)
-
-
-# sort best
-results = sorted(results, key=lambda x: x[2], reverse=True)
-
-print("\n==============================")
-print("TRADE SUGGESTIONS")
-print("==============================\n")
-
-for r in results[:25]:
-    print(
-        f"{r[0]:15} | RSI:{r[1]:.1f} | Score:{r[2]} | {r[3]} | {r[4]}"
+    df = pd.DataFrame(
+        results,
+        columns=["Stock","RSI","Score","Signal","Trade Type"]
     )
+
+    df = df.sort_values("Score", ascending=False)
+
+    st.success("Scan complete")
+
+    st.dataframe(df, use_container_width=True)
